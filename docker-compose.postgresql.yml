@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    command: -c shared_preload_libraries=pg_stat_statements
+    environment:
+      # 请修改为自己的密码
+      POSTGRES_USER: wewe_rss
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: wewe-rss
+      TZ: 'Asia/Shanghai'
+    ports:
+      - 15432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 可选：初始化脚本目录
+      # - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wewe_rss -d wewe-rss']
+      timeout: 45s
+      interval: 10s
+      retries: 10
+
+  app:
+    image: cooderl/wewe-rss:latest
+    ports:
+      - 4000:4000
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # PostgreSQL 数据库连接地址
+      - DATABASE_URL=postgresql://wewe_rss:123456@db:5432/wewe-rss?schema=public&connect_timeout=30&pool_timeout=30
+      # 数据库类型设置为 postgresql
+      - DATABASE_TYPE=postgresql
+      # 服务接口请求授权码
+      - AUTH_CODE=123567
+      # 提取全文内容模式
+      # - FEED_MODE=fulltext
+      # 定时更新订阅源Cron表达式
+      # - CRON_EXPRESSION=35 5,17 * * *
+      # 服务接口请求限制，每分钟请求次数
+      # - MAX_REQUEST_PER_MINUTE=60
+      # 外网访问时，需设置为服务器的公网 IP 或者域名地址
+      # - SERVER_ORIGIN_URL=http://localhost:4000
+
+networks:
+  wewe-rss-postgres:
+
+volumes:
+  postgres_data:
