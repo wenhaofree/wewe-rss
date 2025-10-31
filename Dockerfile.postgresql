@@ -1,0 +1,39 @@
+FROM node:20.16.0-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+RUN npm i -g pnpm
+
+FROM base AS build
+COPY . /usr/src/app
+WORKDIR /usr/src/app
+
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+
+RUN pnpm run -r build
+
+RUN pnpm deploy --filter=server --prod /app
+
+# 复制PostgreSQL schema
+RUN cp /usr/src/app/apps/server/prisma/schema.postgresql.prisma /app/prisma/schema.prisma
+
+RUN cd /app && pnpm exec prisma generate
+
+FROM base AS app-postgres
+COPY --from=build /app /app
+
+WORKDIR /app
+
+EXPOSE 4000
+
+ENV NODE_ENV=production
+ENV HOST="0.0.0.0"
+ENV SERVER_ORIGIN_URL=""
+ENV MAX_REQUEST_PER_MINUTE=60
+ENV AUTH_CODE=""
+ENV DATABASE_URL=""
+ENV DATABASE_PROVIDER="postgresql"
+
+RUN chmod +x ./docker-bootstrap.sh
+
+CMD ["./docker-bootstrap.sh"]

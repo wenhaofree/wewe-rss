@@ -82,12 +82,120 @@
 
 #### PostgreSQL (推荐)
 
-使用 Docker Compose 启动：
+**方法1: 使用现有 PostgreSQL 容器**
+
+如果您已有运行中的 PostgreSQL 容器（如 `haoju-postgres`），可以直接连接：
+
+**使用现有 haoju-postgres 容器配置：**
+- 容器名称: `haoju-postgres`
+- 数据库: `spider_gzh_db`
+- 用户名: `root`
+- 密码: `fuwenhao`
+- 端口: `5432`
+
+1. 使用提供的 docker-compose 配置启动：
+   ```sh
+   docker-compose -f docker-compose.postgresql.yml up -d
+   ```
+
+2. 或使用 Docker 直接连接现有 PostgreSQL 容器（推荐用于部署）：
+   ```sh
+   # 首先创建自定义启动脚本（用于处理 PostgreSQL schema）
+   cat > docker-bootstrap-postgres.sh << 'EOF'
+   #!/bin/sh
+
+   # 等待数据库连接
+   echo "Waiting for database connection..."
+   while ! nc -z host.docker.internal 5432; do
+     sleep 1
+   done
+   echo "Database connected!"
+
+   # 复制 PostgreSQL schema
+   cp /app/prisma/schema.postgresql.prisma /app/prisma/schema.prisma
+
+   # 生成 Prisma 客户端
+   cd /app && npx prisma generate
+
+   # 运行数据库迁移（如果需要）
+   cd /app && npx prisma db push
+
+   # 启动应用
+   cd /app && node dist/main.js
+   EOF
+
+   chmod +x docker-bootstrap-postgres.sh
+
+   # 启动 wewe-rss 容器
+   docker run -d --name wewe-rss -p 4000:4000 --restart unless-stopped \
+     -v "$(pwd)/apps/server/prisma/schema.postgresql.prisma:/app/prisma/schema.postgresql.prisma:ro" \
+     -v "$(pwd)/docker-bootstrap-postgres.sh:/tmp/docker-bootstrap-postgres.sh:ro" \
+     -e DATABASE_URL="postgresql://root:fuwenhao@host.docker.internal:5432/spider_gzh_db?schema=public&connect_timeout=30&pool_timeout=30" \
+     -e DATABASE_PROVIDER=postgresql \
+     -e AUTH_CODE=123567 \
+     -e FEED_MODE=fulltext \
+     -e CRON_EXPRESSION="35 5,17 * * *" \
+     -e MAX_REQUEST_PER_MINUTE=60 \
+     -e SERVER_ORIGIN_URL=http://localhost:4000 \
+     -e HOST=0.0.0.0 \
+     -e PORT=4000 \
+     -e ENABLE_CLEAN_HTML=false \
+     -e UPDATE_DELAY_TIME=60 \
+     -e PLATFORM_URL=https://weread.111965.xyz \
+     cooderl/wewe-rss:latest /bin/sh /tmp/docker-bootstrap-postgres.sh
+   ```
+
+3. 或使用本地开发模式（推荐用于调试）：
+   ```sh
+   # 配置环境变量
+   cp apps/server/.env.local.example apps/server/.env.local
+   # 编辑 .env.local 设置 PostgreSQL 连接信息
+
+   # 安装依赖并构建
+   pnpm install
+   pnpm run -r build
+
+   # 生成 Prisma 客户端
+   cd apps/server
+   DATABASE_URL="postgresql://root:fuwenhao@127.0.0.1:5432/spider_gzh_db?schema=public&connect_timeout=30&pool_timeout=30" npx prisma generate
+
+   # 推送数据库模式
+   DATABASE_URL="postgresql://root:fuwenhao@127.0.0.1:5432/spider_gzh_db?schema=public&connect_timeout=30&pool_timeout=30" npx prisma db push
+
+   # 启动服务
+   DATABASE_URL="postgresql://root:fuwenhao@127.0.0.1:5432/spider_gzh_db?schema=public&connect_timeout=30&pool_timeout=30" DATABASE_PROVIDER="postgresql" node dist/main.js
+   ```
+
+**验证服务是否正常运行：**
 ```sh
-docker-compose -f docker-compose.postgresql.yml up -d
+# 检查容器状态
+docker ps | grep wewe-rss
+
+# 查看启动日志
+docker logs wewe-rss --tail 20
+
+# 测试服务是否正常响应
+curl -s http://localhost:4000 | head -10
+
+# 测试API接口
+curl -s http://localhost:4000/feeds
 ```
 
-或手动启动：
+如果看到以下输出说明服务启动成功：
+- 容器状态显示 `Up` 和运行时间
+- 日志最后显示 `Server is running at http://0.0.0.0:4000`
+- 主页返回 WeWe RSS 界面
+- API接口返回订阅源数据
+
+   **自定义数据库连接：**
+   如需连接其他数据库，请修改 `DATABASE_URL` 格式：
+   ```
+   postgresql://username:password@host:port/database_name?schema=public&connect_timeout=30&pool_timeout=30
+   ```
+
+**方法2: 使用新 PostgreSQL 容器**
+
+如果需要创建新的 PostgreSQL 容器：
 
 1. 创建docker网络
    ```sh
@@ -119,6 +227,8 @@ docker-compose -f docker-compose.postgresql.yml up -d
      --network wewe-rss-postgres \
      cooderl/wewe-rss:latest
    ```
+
+**注意**: 目前官方 Docker 镜像 `cooderl/wewe-rss:latest` 可能仍使用 MySQL 模式，建议使用本地构建或开发模式以确保 PostgreSQL 兼容性。
 
 #### SQLite (不推荐)
 
